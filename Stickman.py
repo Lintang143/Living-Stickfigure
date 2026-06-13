@@ -28,7 +28,7 @@ FONT_S = pygame.font.SysFont("Arial", 12)
 FONT_M = pygame.font.SysFont("Arial", 14)
 FONT_L = pygame.font.SysFont("Arial", 18)
 
-GROQ_API_KEY = "gsk_KlUDe6EQ8UYBq1U6iYj1WGdyb3FY"
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
 # --- DATA CONFIG STRUCTURE ---
 class StickmanConfig:
@@ -339,4 +339,141 @@ while running:
             alive_rect = pygame.Rect(m_x + 30, m_y + 350, 18, 18)
             pygame.draw.rect(screen, WHITE, alive_rect)
             pygame.draw.rect(screen, BLACK, alive_rect, 1)
-            if modal_cfg.m
+            if modal_cfg.make_alive:
+                pygame.draw.line(screen, GREEN, (alive_rect.x+2, alive_rect.y+2), (alive_rect.x+14, alive_rect.y+14), 2)
+            screen.blit(FONT_M.render("Make it alive after save", True, BLACK), (m_x + 55, m_y + 350))
+
+        # Tombol Eksekusi Save
+        btn_save = pygame.Rect(m_x + modal_w - 110, m_y + modal_h - 45, 90, 30)
+        pygame.draw.rect(screen, BLUE_ACT, btn_save, border_radius=4)
+        screen.blit(FONT_M.render("SAVE", True, WHITE), (btn_save.x + 25, btn_save.y + 7))
+
+
+    # SYSTEM EVENT CAPTURE
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            # JIKA MODAL MENU SAVE AKTIF
+            if show_save_modal:
+                m_x, m_y = (WIDTH - 400) // 2, (HEIGHT - (450 if adv_settings_expanded else 200)) // 2
+                file_box = pygame.Rect(m_x + 110, m_y + 55, 250, 25)
+                adv_header = pygame.Rect(m_x + 20, m_y + 100, 360, 25)
+                btn_save = pygame.Rect(m_x + 400 - 110, m_y + (450 if adv_settings_expanded else 200) - 45, 90, 30)
+
+                if file_box.collidepoint(mx, my): input_filename_active = True
+                else: input_filename_active = False
+
+                if adv_header.collidepoint(mx, my):
+                    adv_settings_expanded = not adv_settings_expanded
+
+                if adv_settings_expanded:
+                    anger_rect = pygame.Rect(m_x + 30, m_y + 140, 18, 18)
+                    alive_rect = pygame.Rect(m_x + 30, m_y + 350, 18, 18)
+                    if anger_rect.collidepoint(mx, my): modal_cfg.anger = not modal_cfg.anger
+                    if alive_rect.collidepoint(mx, my): modal_cfg.make_alive = not modal_cfg.make_alive
+                    if pygame.Rect(m_x + 120, m_y + 175, 150, 15).collidepoint(mx, my):
+                        modal_cfg.speed = int((mx - (m_x + 120)) / 10)
+                        modal_cfg.speed = max(1, min(15, modal_cfg.speed))
+
+                if btn_save.collidepoint(mx, my):
+                    # Dump File Log ke Desktop komputer asli sesuai request
+                    save_path = os.path.expanduser(f"~/Desktop/{modal_cfg.filename}.json")
+                    try:
+                        import json
+                        with open(save_path, "w") as f:
+                            json.dump({"alive": modal_cfg.make_alive, "anger": modal_cfg.anger, "speed": modal_cfg.speed}, f)
+                    except: pass
+                    
+                    if selected_stickman_idx is not None:
+                        active_stickmen[selected_stickman_idx].cfg = modal_cfg
+                        active_stickmen[selected_stickman_idx].alive = modal_cfg.make_alive
+                        if modal_cfg.make_alive:
+                            active_stickmen[selected_stickman_idx].speech_text = "AKU HIDUP!"
+                            active_stickmen[selected_stickman_idx].speech_timer = 40
+                            active_stickmen[selected_stickman_idx].speech_pos = (active_stickmen[selected_stickman_idx].x, active_stickmen[selected_stickman_idx].y - 45)
+                    
+                    show_save_modal = False # Tutup tab modal, balik ke tab utama
+                continue
+
+            # JIKA MENU KLIK KANAN (CONTEXT MENU) AKTIF
+            if show_context_menu and context_menu_pos:
+                cx, cy = context_menu_pos
+                del_rect = pygame.Rect(cx, cy, 110, 25)
+                save_rect = pygame.Rect(cx, cy + 25, 110, 25)
+
+                if event.button == 1:
+                    if del_rect.collidepoint(mx, my) and selected_stickman_idx is not None:
+                        active_stickmen.pop(selected_stickman_idx)
+                    elif save_rect.collidepoint(mx, my) and selected_stickman_idx is not None:
+                        show_save_modal = True
+                    show_context_menu = False
+                    continue
+                else:
+                    show_context_menu = False
+
+            # AKSI MOUSE UTAMA PADA KANVAS
+            if event.button == 1: # Klik Kiri
+                panel_clicked = False
+                for tool_name, ty in tools:
+                    if pygame.Rect(10, ty, 80, 40).collidepoint(mx, my):
+                        current_tool = tool_name
+                        panel_clicked = True
+                        for t in canvas_text_inputs: t["active"] = False
+                
+                if not panel_clicked and mx > 100:
+                    if current_tool == "STICKMAN":
+                        active_stickmen.append(LivingStickman(mx, my, StickmanConfig()))
+                    elif current_tool == "TEXT":
+                        active_found = False
+                        for t in canvas_text_inputs:
+                            if t["active"] and t["text"].strip():
+                                active_found = True
+                                t["active"] = False
+                                if active_stickmen:
+                                    target_stick = active_stickmen[0]
+                                    reply = ai_brain.ask_stickman(target_stick.cfg, t["text"])
+                                    target_stick.speech_text = reply
+                                    target_stick.speech_timer = 90
+                                    target_stick.speech_pos = (target_stick.x + 20, target_stick.y - 30)
+                        
+                        if not active_found:
+                            canvas_text_inputs.append({"pos": (mx, my), "text": "", "active": True})
+
+            elif event.button == 3: # Klik Kanan Memicu Modifikasi Menu
+                for idx, stick in enumerate(active_stickmen):
+                    if math.hypot(mx - stick.x, my - stick.y) < 30:
+                        selected_stickman_idx = idx
+                        context_menu_pos = (mx, my)
+                        show_context_menu = True
+
+        elif event.type == pygame.KEYDOWN:
+            if show_save_modal and input_filename_active:
+                if event.key == pygame.K_BACKSPACE:
+                    modal_cfg.filename = modal_cfg.filename[:-1]
+                else:
+                    if len(modal_cfg.filename) < 20 and (event.unicode.isalnum() or event.unicode == "_"):
+                        modal_cfg.filename += event.unicode
+            else:
+                for t in canvas_text_inputs:
+                    if t["active"]:
+                        if event.key == pygame.K_BACKSPACE:
+                            t["text"] = t["text"][:-1]
+                        elif event.key == pygame.K_RETURN:
+                            t["active"] = False
+                            if active_stickmen and t["text"].strip():
+                                target_stick = active_stickmen[0]
+                                reply = ai_brain.ask_stickman(target_stick.cfg, t["text"])
+                                target_stick.speech_text = reply
+                                target_stick.speech_timer = 120
+                                target_stick.speech_pos = (target_stick.x + 20, target_stick.y - 30)
+                        else:
+                            if len(t["text"]) < 60:
+                                t["text"] += event.unicode
+
+    pygame.display.flip()
+    clock.tick(60) # Dikunci di 60 FPS murni agar lancar dan responsif via RDP HP
+
+pygame.quit()
+sys.exit()
