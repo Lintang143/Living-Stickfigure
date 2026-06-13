@@ -11,7 +11,7 @@ from duckduckgo_search import DDGS
 pygame.init()
 WIDTH, HEIGHT = 900, 600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Animator vs Stickman AI - Smooth Physics Edition")
+pygame.display.set_caption("Animator vs Stickman AI - Fixed Spawn State")
 clock = pygame.time.Clock()
 
 # Colors
@@ -39,10 +39,10 @@ class StickmanConfig:
         self.health = 100
         # Traits
         self.thinking = True
-        self.anger = False  # Jika TRUE, dia akan agresif mengejar dan menyerang mouse!
+        self.anger = False  
         self.curiosity = True
         self.selfPreservation = True
-        self.make_alive = True
+        self.make_alive = False  # <-- SEKARANG DEFAULT-NYA MATI (DIAM KAKU)
 
 # --- AI BRAIN ---
 class GroqBrain:
@@ -86,9 +86,9 @@ class LivingStickman:
         # Physics & Inertia Vectors
         self.vx = 0
         self.vy = 0
-        self.target_vx = random.choice([-2, 2])
-        self.target_vy = random.choice([-2, 2])
-        self.friction = 0.85  # Membuat rem pergerakan jadi smooth
+        self.target_vx = 0
+        self.target_vy = 0
+        self.friction = 0.85  
         self.acceleration = 0.2
         
         # Communication Bubble via Text Tool
@@ -98,7 +98,14 @@ class LivingStickman:
 
     def update(self, mouse_pos, mouse_pressed, current_tool):
         self.timer += 1
-        if not self.alive: return
+        if not self.alive: 
+            # Jika mati, paksa semua kecepatan jadi nol agar diam kaku
+            self.vx = 0
+            self.vy = 0
+            self.target_vx = 0
+            self.target_vy = 0
+            if self.speech_timer > 0: self.speech_timer -= 1
+            return
 
         # Hitung Jarak ke Kursor Mouse
         dx = mouse_pos[0] - self.x
@@ -107,9 +114,7 @@ class LivingStickman:
 
         # 1. BRAIN & PHYSICS LOGIC (Dinamis Berdasarkan Sifat)
         if self.cfg.anger:
-            # Jika MARAH: Target kecepatannya dipaksa mengejar lokasi mouse
             if dist > 15:
-                # Menggunakan akselerasi bertahap (Inersia)
                 self.target_vx = (dx / dist) * self.cfg.speed
                 self.target_vy = (dy / dist) * self.cfg.speed
             else:
@@ -119,7 +124,7 @@ class LivingStickman:
             # Mode Pertarungan Jarak Dekat
             if dist < 45:
                 if mouse_pressed[0] and current_tool in ["BRUSH", "FILL"]:
-                    self.health -= 0.8  # Terluka jika animator mencoret/klik kiri dia
+                    self.health -= 0.8  
                     if self.timer % 15 == 0:
                         self.speech_text = random.choice(["Woi! Sakit!", "Jangan coret aku!", "Gak kena!"])
                         self.speech_timer = 30
@@ -135,7 +140,6 @@ class LivingStickman:
                 self.target_vx = random.choice([-3, -1, 1, 3])
                 self.target_vy = random.choice([-3, -1, 1, 3])
 
-            # Pantulan dinding kanvas otomatis
             if self.x < 130 or self.x > WIDTH - 40: self.target_vx *= -1
             if self.y < 60 or self.y > HEIGHT - 40: self.target_vy *= -1
 
@@ -149,44 +153,39 @@ class LivingStickman:
         self.x += self.vx
         self.y += self.vy
 
-        # Pembatas Batas Layar Kanvas (Kliping Hitbox)
         self.x = max(120, min(WIDTH - 40, self.x))
         self.y = max(60, min(HEIGHT - 40, self.y))
 
-        # Update Timer Balon Bicara
         if self.speech_timer > 0: self.speech_timer -= 1
         if self.health <= 0: self.alive = False
 
     def draw(self, surface):
-        # Hitung kecepatan mutlak untuk efek Squash/Stretch animasi
         speed_factor = math.hypot(self.vx, self.vy)
         
         # --- ALAN BECKER ANIMATION ENGINE ---
-        # 1. Efek Napas & Kelenturan Tubuh Dinamis
-        stretch_y = math.sin(self.timer * 0.15) * 2
-        if speed_factor > 1.5:
-            tilt = self.vx * 2.0  # Tubuh condong miring mengikuti arah lari cepat
+        # Efek Kelenturan Tubuh Dinamis (Hanya aktif jika hidup & bergerak)
+        stretch_y = math.sin(self.timer * 0.15) * 2 if self.alive else 0
+        if self.alive and speed_factor > 1.5:
+            tilt = self.vx * 2.0  
             stretch_x = speed_factor * 0.4
         else:
             tilt = 0
             stretch_x = 0
 
-        # Titik Inti Tubuh (Joint Center)
         cx, cy = int(self.x), int(self.y)
-        hx, hy = int(cx + tilt), int(cy - 30 + stretch_y) # Kepala dinamis fleksibel
+        hx, hy = int(cx + tilt), int(cy - 30 + stretch_y) 
 
         color = RED if self.cfg.anger else BLACK
-        thickness = 3 # Ketebalan garis agar visual tajam di RDP
+        thickness = 3 
 
         # A. Kepala Vektor
         pygame.draw.circle(surface, color, (hx, hy), 11, thickness)
         
-        # B. Badan (Tulang Belakang Lentur)
+        # B. Badan
         pygame.draw.line(surface, color, (hx, hy + 11), (cx, cy + 10), thickness)
         
         # C. Sistem Ayunan Tangan & Kaki Berlari (Run Cycle)
-        if speed_factor > 1.0:
-            # Menggunakan rumus gelombang Sinus murni agar ayunan seirama lari mulus
+        if self.alive and speed_factor > 1.0:
             swing = math.sin(self.timer * 0.25) * 16
             pygame.draw.line(surface, color, (cx, cy + 2), (int(cx - 15 + swing), int(cy + 14 - swing)), thickness)
             pygame.draw.line(surface, color, (cx, cy + 2), (int(cx + 15 - swing), int(cy + 14 + swing)), thickness)
@@ -195,19 +194,17 @@ class LivingStickman:
             pygame.draw.line(surface, color, (cx, cy + 10), (int(cx - 12 + leg_swing), cy + 35), thickness)
             pygame.draw.line(surface, color, (cx, cy + 10), (int(cx + 12 - leg_swing), cy + 35), thickness)
         else:
-            # Posisi Berdiam Diri (Idle Mode)
+            # Posisi Berdiam Diri / Kaku Mati (Idle Mode)
             pygame.draw.line(surface, color, (cx, cy + 2), (cx - 16, cy + 12), thickness)
             pygame.draw.line(surface, color, (cx, cy + 2), (cx + 16, cy + 12), thickness)
             
             pygame.draw.line(surface, color, (cx, cy + 10), (cx - 10, cy + 35), thickness)
             pygame.draw.line(surface, color, (cx, cy + 10), (cx + 10, cy + 35), thickness)
 
-        # Bar Kesehatan (Muncul saat bertarung)
-        if self.health < self.max_health:
+        if self.health < self.max_health and self.alive:
             pygame.draw.rect(surface, RED, (self.x - 20, self.y - 60, 40, 5))
             pygame.draw.rect(surface, GREEN, (self.x - 20, self.y - 60, int(40 * (self.health / self.max_health)), 5))
 
-        # Render Balon Dialog Text Tool
         if self.speech_timer > 0 and self.speech_text:
             t_surf = FONT_S.render(self.speech_text, True, color)
             surface.blit(t_surf, self.speech_pos)
@@ -235,26 +232,21 @@ while running:
     mx, my = pygame.mouse.get_pos()
     m_buttons = pygame.mouse.get_pressed()
 
-    # CANVAS BASE RENDER
     screen.fill(WHITE)
 
-    # Menggambar Jejak Coretan Brush Lama
     for p in canvas_drawings:
         pygame.draw.circle(screen, BLACK, p, 3)
 
-    # Menggambar Jejak Teks Buatan Text Tool
     for txt_obj in canvas_text_inputs:
         t_color = BLUE_ACT if txt_obj["active"] else BLACK
         t_surf = FONT_M.render(txt_obj["text"] + ("|" if txt_obj["active"] and pygame.time.get_ticks() % 1000 < 500 else ""), True, t_color)
         screen.blit(t_surf, txt_obj["pos"])
 
-    # Update & Menggambar Wujud Stickman Aktif
     for idx, stick in enumerate(active_stickmen):
         stick.update((mx, my), m_buttons, current_tool)
-        if stick.alive:
-            stick.draw(screen)
+        stick.draw(screen)
 
-    # Panel Bagian Kiri (Tools Menu)
+    # Panel Kiri (Tools Menu)
     pygame.draw.rect(screen, GRAY_PANEL, (0, 0, 100, HEIGHT))
     pygame.draw.line(screen, BLACK, (100, 0), (100, HEIGHT), 2)
 
@@ -270,7 +262,6 @@ while running:
         txt = FONT_M.render(tool_name, True, BLACK if bg != BLUE_ACT else WHITE)
         screen.blit(txt, (btn_rect.x + 10, btn_rect.y + 12))
 
-    # Real-time Corek Kanvas (Kuas Aktif)
     if not show_save_modal and not show_context_menu:
         if m_buttons[0] and mx > 100:
             if current_tool == "BRUSH":
@@ -278,7 +269,6 @@ while running:
             elif current_tool == "FILL":
                 screen.fill(BLACK)
 
-    # Menu Klik Kanan (Pop-up Context)
     if show_context_menu and context_menu_pos:
         cx, cy = context_menu_pos
         del_rect = pygame.Rect(cx, cy, 110, 25)
@@ -292,7 +282,7 @@ while running:
         screen.blit(FONT_M.render("Delete Stickman", True, BLACK), (cx + 5, cy + 5))
         screen.blit(FONT_M.render("Save Stickman", True, BLACK), (cx + 5, cy + 30))
 
-    # INTERFAS TAB BARU (MODAL MENU SAVE)
+    # MODAL MENU SAVE
     if show_save_modal:
         overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 110))
@@ -322,7 +312,7 @@ while running:
         screen.blit(FONT_M.render(exp_txt, True, BLACK), (adv_header.x + 10, adv_header.y + 5))
 
         if adv_settings_expanded:
-            # Trait: Anger Checkbox
+            # Trait: Anger
             anger_rect = pygame.Rect(m_x + 30, m_y + 140, 18, 18)
             pygame.draw.rect(screen, WHITE, anger_rect)
             pygame.draw.rect(screen, BLACK, anger_rect, 1)
@@ -330,7 +320,7 @@ while running:
                 pygame.draw.line(screen, RED, (anger_rect.x+2, anger_rect.y+2), (anger_rect.x+14, anger_rect.y+14), 2)
             screen.blit(FONT_M.render("Anger Trait (Enable Combat Mod against Mouse)", True, BLACK), (m_x + 55, m_y + 140))
 
-            # Stat: Speed Adjuster Slider
+            # Stat: Speed
             screen.blit(FONT_M.render(f"Speed: {modal_cfg.speed}", True, BLACK), (m_x + 30, m_y + 175))
             pygame.draw.line(screen, BLACK, (m_x + 120, m_y + 182), (m_x + 270, m_y + 182), 2)
             pygame.draw.circle(screen, BLUE_ACT, (m_x + 120 + (modal_cfg.speed * 10), m_y + 182), 6)
@@ -343,7 +333,6 @@ while running:
                 pygame.draw.line(screen, GREEN, (alive_rect.x+2, alive_rect.y+2), (alive_rect.x+14, alive_rect.y+14), 2)
             screen.blit(FONT_M.render("Make it alive after save", True, BLACK), (m_x + 55, m_y + 350))
 
-        # Tombol Eksekusi Save
         btn_save = pygame.Rect(m_x + modal_w - 110, m_y + modal_h - 45, 90, 30)
         pygame.draw.rect(screen, BLUE_ACT, btn_save, border_radius=4)
         screen.blit(FONT_M.render("SAVE", True, WHITE), (btn_save.x + 25, btn_save.y + 7))
@@ -355,7 +344,6 @@ while running:
             running = False
 
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            # JIKA MODAL MENU SAVE AKTIF
             if show_save_modal:
                 m_x, m_y = (WIDTH - 400) // 2, (HEIGHT - (450 if adv_settings_expanded else 200)) // 2
                 file_box = pygame.Rect(m_x + 110, m_y + 55, 250, 25)
@@ -378,7 +366,6 @@ while running:
                         modal_cfg.speed = max(1, min(15, modal_cfg.speed))
 
                 if btn_save.collidepoint(mx, my):
-                    # Dump File Log ke Desktop komputer asli sesuai request
                     save_path = os.path.expanduser(f"~/Desktop/{modal_cfg.filename}.json")
                     try:
                         import json
@@ -394,10 +381,9 @@ while running:
                             active_stickmen[selected_stickman_idx].speech_timer = 40
                             active_stickmen[selected_stickman_idx].speech_pos = (active_stickmen[selected_stickman_idx].x, active_stickmen[selected_stickman_idx].y - 45)
                     
-                    show_save_modal = False # Tutup tab modal, balik ke tab utama
+                    show_save_modal = False 
                 continue
 
-            # JIKA MENU KLIK KANAN (CONTEXT MENU) AKTIF
             if show_context_menu and context_menu_pos:
                 cx, cy = context_menu_pos
                 del_rect = pygame.Rect(cx, cy, 110, 25)
@@ -413,8 +399,7 @@ while running:
                 else:
                     show_context_menu = False
 
-            # AKSI MOUSE UTAMA PADA KANVAS
-            if event.button == 1: # Klik Kiri
+            if event.button == 1: 
                 panel_clicked = False
                 for tool_name, ty in tools:
                     if pygame.Rect(10, ty, 80, 40).collidepoint(mx, my):
@@ -424,7 +409,10 @@ while running:
                 
                 if not panel_clicked and mx > 100:
                     if current_tool == "STICKMAN":
-                        active_stickmen.append(LivingStickman(mx, my, StickmanConfig()))
+                        # MEMBUAT INSTANCE CONFIG BARU KHUSUS YANG BERSTATUS MATI/FALSE
+                        new_cfg = StickmanConfig()
+                        new_cfg.make_alive = False
+                        active_stickmen.append(LivingStickman(mx, my, new_cfg))
                     elif current_tool == "TEXT":
                         active_found = False
                         for t in canvas_text_inputs:
@@ -441,7 +429,7 @@ while running:
                         if not active_found:
                             canvas_text_inputs.append({"pos": (mx, my), "text": "", "active": True})
 
-            elif event.button == 3: # Klik Kanan Memicu Modifikasi Menu
+            elif event.button == 3: 
                 for idx, stick in enumerate(active_stickmen):
                     if math.hypot(mx - stick.x, my - stick.y) < 30:
                         selected_stickman_idx = idx
@@ -473,7 +461,7 @@ while running:
                                 t["text"] += event.unicode
 
     pygame.display.flip()
-    clock.tick(60) # Dikunci di 60 FPS murni agar lancar dan responsif via RDP HP
+    clock.tick(60) 
 
 pygame.quit()
 sys.exit()
